@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useParams } from "react-router";
+import { Navigate, useParams, useSearchParams } from "react-router";
 
 import Sidebar from "../components/Sidebar.jsx";
 import StoryHeader from "../components/StoryHeader.jsx";
@@ -23,30 +23,121 @@ import {
   applyGameStateChanges,
 } from "../utils/gameRules.js";
 
+import {
+  unlockChapter,
+  getStoryChapterProgress,
+} from "../services/chapterProgressService.js";
+
+function getChapterNumberFromScene(story, sceneKey, scene) {
+  if (!story || !sceneKey) return 1;
+
+  const chapterFromList = story.chapters?.find(
+    (chapter) => chapter.startScene === sceneKey
+  );
+
+  if (chapterFromList?.chapterNumber) {
+    return chapterFromList.chapterNumber;
+  }
+
+  const tag = scene?.tag || "";
+  const title = scene?.title || "";
+  const textToCheck = `${tag} ${title}`.toLowerCase();
+
+  if (textToCheck.includes("final")) return 4;
+  if (textToCheck.includes("4")) return 4;
+  if (textToCheck.includes("3")) return 3;
+  if (textToCheck.includes("2")) return 2;
+
+  return 1;
+}
+
 function Game() {
   const { storyId } = useParams();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
 
   const story = stories.find((item) => item.id === storyId);
+  const requestedScene = searchParams.get("scene");
 
-  const [currentSceneKey, setCurrentSceneKey] = useState(
-    story?.startScene || ""
-  );
-
+  const [currentSceneKey, setCurrentSceneKey] = useState("");
   const [stats, setStats] = useState(initialStats);
   const [gameState, setGameState] = useState(initialGameState);
   const [statusText, setStatusText] = useState("");
 
+  const [allowedChapter, setAllowedChapter] = useState(1);
+  const [checkingChapterAccess, setCheckingChapterAccess] = useState(true);
+
+  function getInitialScene() {
+    if (story?.scenes?.[requestedScene]) {
+      return requestedScene;
+    }
+
+    return story?.startScene || "";
+  }
+
   useEffect(() => {
     if (!story) return;
 
-    setCurrentSceneKey(story.startScene);
+    setCurrentSceneKey(getInitialScene());
     setStats(initialStats);
     setGameState(initialGameState);
     setStatusText("");
-  }, [storyId]);
+  }, [storyId, requestedScene]);
+
+  useEffect(() => {
+    async function checkChapterAccess() {
+      if (!user?.id || !story?.id) {
+        setCheckingChapterAccess(false);
+        return;
+      }
+
+      try {
+        setCheckingChapterAccess(true);
+
+        const progress = await getStoryChapterProgress({
+          userId: user.id,
+          storyId: story.id,
+        });
+
+        setAllowedChapter(progress?.highest_chapter_unlocked || 1);
+      } catch (error) {
+        console.error("Error verificando acceso:", error.message);
+        setAllowedChapter(1);
+      } finally {
+        setCheckingChapterAccess(false);
+      }
+    }
+
+    checkChapterAccess();
+  }, [user?.id, story?.id]);
 
   if (!story || story.status !== "available") {
+    return <Navigate to="/historias" replace />;
+  }
+
+  if (checkingChapterAccess) {
+    return (
+      <main className="auth-page">
+        <section className="auth-card">
+          <span className="home-kicker">Verificando acceso</span>
+          <h1>Cargando...</h1>
+          <p>Estamos revisando los capítulos desbloqueados.</p>
+        </section>
+      </main>
+    );
+  }
+
+  const requestedSceneData = requestedScene
+    ? story.scenes?.[requestedScene]
+    : null;
+
+  const requestedChapterNumber = getChapterNumberFromScene(
+    story,
+    requestedScene,
+    requestedSceneData
+  );
+
+  if (requestedScene && requestedChapterNumber > allowedChapter) {
     return <Navigate to="/historias" replace />;
   }
 
@@ -67,6 +158,28 @@ function Game() {
     );
   }
 
+  async function unlockSceneChapter(nextSceneKey) {
+    const nextScene = story.scenes[nextSceneKey];
+
+    const nextChapterNumber = getChapterNumberFromScene(
+      story,
+      nextSceneKey,
+      nextScene
+    );
+
+    try {
+      await unlockChapter({
+        userId: user.id,
+        storyId: story.id,
+        chapterNumber: nextChapterNumber,
+      });
+
+      setAllowedChapter((current) => Math.max(current, nextChapterNumber));
+    } catch (error) {
+      console.error("Error desbloqueando capítulo:", error.message);
+    }
+  }
+
   async function handleChoice(choice) {
     const updatedStats = applyChoiceEffects(stats, choice.effect || {});
     const updatedGameState = applyGameStateChanges(gameState, choice);
@@ -77,6 +190,8 @@ function Game() {
 
     if (updatedStats.vida <= 0 && story.scenes.finalSinVida) {
       setCurrentSceneKey("finalSinVida");
+
+      await unlockSceneChapter("finalSinVida");
 
       try {
         await saveUnlockedEnding({
@@ -93,6 +208,8 @@ function Game() {
     }
 
     setCurrentSceneKey(choice.next);
+
+    await unlockSceneChapter(choice.next);
 
     const nextScene = story.scenes[choice.next];
 
@@ -149,6 +266,8 @@ function Game() {
         flags: saved.flags || {},
       });
 
+      await unlockSceneChapter(saved.current_scene_key);
+
       setStatusText("Partida cargada correctamente desde la base de datos.");
     } catch (error) {
       setStatusText(`Error al cargar: ${error.message}`);
@@ -192,19 +311,16 @@ function Game() {
         />
 
         <section className="main-area">
-        <StoryHeader
-  chapter={scene.tag}
-  title={scene.title}
-  description={scene.headerSubtitle}
-/>
+          <StoryHeader
+            chapter={scene.tag}
+            title={scene.title}
+            description={scene.headerSubtitle}
+          />
 
           <section className="play-area">
             <ScenePanel scene={scene} statusText={statusText} />
 
-            <StatsBox
-              stats={stats}
-              gameState={gameState}
-            />
+            <StatsBox stats={stats} gameState={gameState} />
           </section>
 
           <Choices
