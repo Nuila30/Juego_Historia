@@ -5,6 +5,9 @@ import Game from "./pages/Game.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
 import Profile from "./pages/Profile.jsx";
+import ForgotPassword from "./pages/ForgotPassword.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
+
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 
@@ -36,8 +39,10 @@ function App() {
       <Route path="/" element={<AuthRedirect />} />
 
       <Route path="/login" element={<Login />} />
-
       <Route path="/registro" element={<Register />} />
+
+      <Route path="/olvide-contrasena" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route
         path="/historias"

@@ -192,10 +192,11 @@ function Game() {
         />
 
         <section className="main-area">
-          <StoryHeader
-            title={scene.headerTitle}
-            subtitle={scene.headerSubtitle}
-          />
+        <StoryHeader
+  chapter={scene.tag}
+  title={scene.title}
+  description={scene.headerSubtitle}
+/>
 
           <section className="play-area">
             <ScenePanel scene={scene} statusText={statusText} />

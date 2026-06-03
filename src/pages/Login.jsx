@@ -106,7 +106,9 @@ function Login() {
         </form>
 
         {message && <div className="auth-message">{message}</div>}
-
+        <p className="auth-link">
+  <Link to="/olvide-contrasena">¿Olvidaste tu contraseña?</Link>
+</p>
         <p className="auth-link">
           ¿No tienes cuenta? <Link to="/registro">Crear cuenta</Link>
         </p>

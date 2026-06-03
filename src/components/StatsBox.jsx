@@ -1,51 +1,80 @@
-function StatBar({ label, value, max = 100, type }) {
-  const percentage = Math.max(0, Math.min(100, (value / max) * 100));
+import { useAuth } from "../context/AuthContext.jsx";
+
+function ProgressCircle({ label, value, max = 100, type }) {
+  const safeValue = Number(value) || 0;
+  const percentage = Math.max(0, Math.min(100, (safeValue / max) * 100));
 
   return (
-    <div className={`game-stat-card ${type}`}>
-      <div className="game-stat-head">
-        <span>{label}</span>
-        <strong>{value}</strong>
+    <div className={`progress-stat-card ${type}`}>
+      <div
+        className="progress-circle"
+        style={{
+          "--progress": `${percentage}%`,
+        }}
+      >
+        <div className="progress-circle-inner">
+          <strong>{safeValue}</strong>
+        </div>
       </div>
 
-      <div className="game-stat-bar">
-        <div style={{ width: `${percentage}%` }}></div>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function PlayerStatusHeader({ user }) {
+  const username =
+    user?.user_metadata?.username && user.user_metadata.username !== "null"
+      ? user.user_metadata.username
+      : user?.email;
+
+  const avatarUrl = user?.user_metadata?.avatar_url;
+  const avatarLetter = username?.charAt(0)?.toUpperCase() || "U";
+
+  return (
+    <div className="stats-player-card">
+      {avatarUrl ? (
+        <img className="stats-player-avatar" src={avatarUrl} alt={username} />
+      ) : (
+        <span className="stats-player-avatar stats-player-letter">
+          {avatarLetter}
+        </span>
+      )}
+
+      <div>
+        <span>Estado</span>
+        <h3>{username}</h3>
       </div>
     </div>
   );
 }
 
-function StatsBox({ stats, gameState }) {
+function StatsContent({ stats, gameState, user }) {
+  const inventory = gameState?.inventory || [];
+  const clues = gameState?.clues || [];
+
   return (
-    <aside className="stats-box stats-box-premium">
-      <div className="stats-title">
-        <span>Estado</span>
-        <h3>Jugador</h3>
-      </div>
+    <>
+      <PlayerStatusHeader user={user} />
 
-      <div className="stats-list">
-        <StatBar
-          label="Vida"
-          value={stats.vida}
-          max={100}
-          type="vida"
-        />
+      <div className="progress-stats-grid">
+        <ProgressCircle label="Vida" value={stats.vida} max={100} type="vida" />
 
-        <StatBar
+        <ProgressCircle
           label="Inteligencia"
           value={stats.inteligencia}
           max={10}
           type="inteligencia"
         />
 
-        <StatBar
+        <ProgressCircle
           label="Confianza"
           value={stats.confianza}
           max={10}
           type="confianza"
         />
 
-        <StatBar
+        <ProgressCircle
           label="Honestidad"
           value={stats.honestidad}
           max={10}
@@ -57,14 +86,14 @@ function StatsBox({ stats, gameState }) {
         <div className="inventory-block">
           <div className="inventory-head">
             <span>Objetos</span>
-            <strong>{gameState.inventory.length}</strong>
+            <strong>{inventory.length}</strong>
           </div>
 
-          {gameState.inventory.length === 0 ? (
+          {inventory.length === 0 ? (
             <p>No has encontrado objetos.</p>
           ) : (
             <ul>
-              {gameState.inventory.map((item) => (
+              {inventory.map((item) => (
                 <li key={item}>{item.replaceAll("_", " ")}</li>
               ))}
             </ul>
@@ -74,19 +103,47 @@ function StatsBox({ stats, gameState }) {
         <div className="inventory-block">
           <div className="inventory-head">
             <span>Pistas</span>
-            <strong>{gameState.clues.length}</strong>
+            <strong>{clues.length}</strong>
           </div>
 
-          {gameState.clues.length === 0 ? (
+          {clues.length === 0 ? (
             <p>No has encontrado pistas.</p>
           ) : (
             <ul>
-              {gameState.clues.map((clue) => (
+              {clues.map((clue) => (
                 <li key={clue}>{clue.replaceAll("_", " ")}</li>
               ))}
             </ul>
           )}
         </div>
+      </div>
+    </>
+  );
+}
+
+function StatsBox({ stats, gameState }) {
+  const { user } = useAuth();
+
+  const username =
+    user?.user_metadata?.username && user.user_metadata.username !== "null"
+      ? user.user_metadata.username
+      : user?.email;
+
+  return (
+    <aside className="stats-box stats-box-premium">
+      <details className="mobile-stats-dropdown">
+        <summary>
+          <span>Estado</span>
+          <strong>{username}</strong>
+        </summary>
+
+        <div className="mobile-stats-content">
+          <StatsContent stats={stats} gameState={gameState} user={user} />
+        </div>
+      </details>
+
+      <div className="desktop-stats-content">
+        <StatsContent stats={stats} gameState={gameState} user={user} />
       </div>
     </aside>
   );

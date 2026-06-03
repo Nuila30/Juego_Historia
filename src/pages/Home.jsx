@@ -1,15 +1,11 @@
 import { Link } from "react-router";
 import StoryCard from "../components/StoryCard.jsx";
+import UserBadge from "../components/UserBadge.jsx";
 import { stories } from "../data/stories.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 function Home() {
   const { user, logout } = useAuth();
-
-  const username =
-    user?.user_metadata?.username && user.user_metadata.username !== "null"
-      ? user.user_metadata.username
-      : user?.email;
 
   const availableStories = stories.filter(
     (story) => story.status === "available"
@@ -32,16 +28,7 @@ function Home() {
         </Link>
 
         <div className="nav-actions">
-          <div className="user-pill">
-            <span className="user-avatar">
-              {username?.charAt(0)?.toUpperCase() || "U"}
-            </span>
-
-            <div>
-              <small>Jugador</small>
-              <span>{username}</span>
-            </div>
-          </div>
+          <UserBadge user={user} />
 
           <Link to="/perfil" className="nav-btn">
             Mi perfil
