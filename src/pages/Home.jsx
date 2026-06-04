@@ -1,10 +1,12 @@
 import { Link } from "react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { stories } from "../data/stories.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import UserBadge from "../components/UserBadge.jsx";
+import { getPlayableStories } from "../services/storyLibraryService.js";
 import { getChapterProgress } from "../services/chapterProgressService.js";
+
+const CHAPTERS_PER_PAGE = 5;
 
 function ChapterCard({ story, chapter, highestUnlocked }) {
   const isAvailable =
@@ -17,17 +19,22 @@ function ChapterCard({ story, chapter, highestUnlocked }) {
       <article className="chapter-card chapter-card-locked">
         <div className="chapter-card-image">
           <img src={chapter.image || story.cover} alt={chapter.title} />
+
           <div className="chapter-lock">
             {story.status !== "available" ? "Próximamente" : "Bloqueado"}
           </div>
+
+          <div className="chapter-number">{chapter.label}</div>
         </div>
 
         <div className="chapter-card-body">
-          <span>{chapter.label}</span>
           <h3>{chapter.title}</h3>
-          <p className="chapter-requirement">
-            Completa el capítulo anterior para desbloquearlo.
-          </p>
+
+          {story.status === "available" && (
+            <p className="chapter-requirement">
+              Completa el capítulo anterior para desbloquearlo.
+            </p>
+          )}
         </div>
       </article>
     );
@@ -40,11 +47,11 @@ function ChapterCard({ story, chapter, highestUnlocked }) {
     >
       <div className="chapter-card-image">
         <img src={chapter.image || story.cover} alt={chapter.title} />
+
         <div className="chapter-number">{chapter.label}</div>
       </div>
 
       <div className="chapter-card-body">
-        <span>{chapter.label}</span>
         <h3>{chapter.title}</h3>
       </div>
     </Link>
@@ -52,47 +59,63 @@ function ChapterCard({ story, chapter, highestUnlocked }) {
 }
 
 function StoryCarousel({ story, highestUnlocked }) {
-  const carouselRef = useRef(null);
+  const [page, setPage] = useState(0);
+
   const chapters = story.chapters || [];
+  const totalPages = Math.ceil(chapters.length / CHAPTERS_PER_PAGE);
 
-  function moveCarousel(direction) {
-    if (!carouselRef.current) return;
+  const startIndex = page * CHAPTERS_PER_PAGE;
+  const endIndex = startIndex + CHAPTERS_PER_PAGE;
+  const visibleChapters = chapters.slice(startIndex, endIndex);
 
-    const scrollAmount = carouselRef.current.clientWidth * 0.85;
+  function goPrev() {
+    setPage((current) => Math.max(current - 1, 0));
+  }
 
-    carouselRef.current.scrollBy({
-      left: direction === "right" ? scrollAmount : -scrollAmount,
-      behavior: "smooth",
-    });
+  function goNext() {
+    setPage((current) => Math.min(current + 1, totalPages - 1));
   }
 
   return (
     <section className="chapter-story-block">
       <div className="chapter-story-heading">
         <div>
-          <span>{story.genre}</span>
+          <span>{story.genre || "Historia"}</span>
           <h2>{story.title}</h2>
         </div>
 
         {story.subtitle && <p>{story.subtitle}</p>}
       </div>
 
-      <div className="chapter-progress-note">
-        Capítulo desbloqueado: <strong>{highestUnlocked}</strong>
+      <div className="chapter-progress-row">
+        <div className="chapter-progress-note">
+          Capítulo desbloqueado: <strong>{highestUnlocked}</strong>
+        </div>
+
+        <div className="chapter-page-indicator">
+          Mostrando capítulos{" "}
+          <strong>
+            {startIndex + 1} - {Math.min(endIndex, chapters.length)}
+          </strong>{" "}
+          de <strong>{chapters.length}</strong>
+        </div>
       </div>
 
       <div className="chapter-carousel-shell">
-        <button
-          className="carousel-arrow carousel-arrow-left"
-          type="button"
-          onClick={() => moveCarousel("left")}
-          aria-label="Capítulos anteriores"
-        >
-          ‹
-        </button>
+        {totalPages > 1 && (
+          <button
+            className="carousel-arrow carousel-arrow-left"
+            type="button"
+            onClick={goPrev}
+            disabled={page === 0}
+            aria-label="Capítulos anteriores"
+          >
+            ‹
+          </button>
+        )}
 
-        <div className="chapter-carousel-track" ref={carouselRef}>
-          {chapters.map((chapter) => (
+        <div className="chapter-carousel-track chapter-page-track">
+          {visibleChapters.map((chapter) => (
             <ChapterCard
               key={chapter.id}
               story={story}
@@ -102,15 +125,41 @@ function StoryCarousel({ story, highestUnlocked }) {
           ))}
         </div>
 
-        <button
-          className="carousel-arrow carousel-arrow-right"
-          type="button"
-          onClick={() => moveCarousel("right")}
-          aria-label="Siguientes capítulos"
-        >
-          ›
-        </button>
+        {totalPages > 1 && (
+          <button
+            className="carousel-arrow carousel-arrow-right"
+            type="button"
+            onClick={goNext}
+            disabled={page === totalPages - 1}
+            aria-label="Siguientes capítulos"
+          >
+            ›
+          </button>
+        )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="chapter-page-buttons">
+          {Array.from({ length: totalPages }).map((_, index) => {
+            const pageStart = index * CHAPTERS_PER_PAGE + 1;
+            const pageEnd = Math.min(
+              pageStart + CHAPTERS_PER_PAGE - 1,
+              chapters.length
+            );
+
+            return (
+              <button
+                key={index}
+                type="button"
+                className={page === index ? "active" : ""}
+                onClick={() => setPage(index)}
+              >
+                Cap. {pageStart} - {pageEnd}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
@@ -118,34 +167,40 @@ function StoryCarousel({ story, highestUnlocked }) {
 function Home() {
   const { user, logout } = useAuth();
 
+  const [stories, setStories] = useState([]);
   const [progressMap, setProgressMap] = useState({});
-  const [loadingProgress, setLoadingProgress] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    async function loadProgress() {
+    async function loadHomeData() {
       try {
-        setLoadingProgress(true);
+        setLoading(true);
+        setMessage("");
 
-        const progress = await getChapterProgress({
-          userId: user.id,
-        });
+        const [loadedStories, progress] = await Promise.all([
+          getPlayableStories(),
+          getChapterProgress({ userId: user.id }),
+        ]);
 
         const mappedProgress = {};
 
         progress.forEach((item) => {
-          mappedProgress[item.story_id] = item.highest_chapter_unlocked || 1;
+          mappedProgress[item.story_id] =
+            item.highest_chapter_unlocked || 1;
         });
 
+        setStories(loadedStories);
         setProgressMap(mappedProgress);
       } catch (error) {
-        console.error("Error cargando progreso de capítulos:", error.message);
+        setMessage(`Error cargando historias: ${error.message}`);
       } finally {
-        setLoadingProgress(false);
+        setLoading(false);
       }
     }
 
     if (user?.id) {
-      loadProgress();
+      loadHomeData();
     }
   }, [user?.id]);
 
@@ -168,6 +223,10 @@ function Home() {
             Mi perfil
           </Link>
 
+          <Link to="/admin" className="nav-btn">
+            Admin
+          </Link>
+
           <button className="nav-btn nav-btn-danger" onClick={logout}>
             Cerrar sesión
           </button>
@@ -185,15 +244,25 @@ function Home() {
         </p>
       </section>
 
-      {loadingProgress ? (
+      {loading && (
         <section className="profile-loading-card">
           <span className="loading-dot"></span>
+
           <div>
-            <h2>Cargando capítulos...</h2>
-            <p>Estamos revisando tu progreso.</p>
+            <h2>Cargando historias...</h2>
+            <p>Estamos buscando historias y progreso del jugador.</p>
           </div>
         </section>
-      ) : (
+      )}
+
+      {message && (
+        <section className="profile-message-card">
+          <h2>Ocurrió un problema</h2>
+          <p>{message}</p>
+        </section>
+      )}
+
+      {!loading && !message && (
         <section className="chapter-library">
           {stories.map((story) => (
             <StoryCarousel

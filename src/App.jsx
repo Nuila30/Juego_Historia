@@ -7,9 +7,13 @@ import Register from "./pages/Register.jsx";
 import Profile from "./pages/Profile.jsx";
 import ForgotPassword from "./pages/ForgotPassword.jsx";
 import ResetPassword from "./pages/ResetPassword.jsx";
-
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
+import AdminPanel from "./pages/AdminPanel.jsx";
+import AdminRoute from "./components/AdminRoute.jsx";
+
+
+
 
 function AuthRedirect() {
   const { user, authLoading } = useAuth();
@@ -70,6 +74,25 @@ function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+  path="/admin"
+  element={
+    <ProtectedRoute>
+      <AdminRoute>
+        <AdminPanel />
+      </AdminRoute>
+    </ProtectedRoute>
+  }
+/>
+
+
+
+
+
+
+
+
+
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

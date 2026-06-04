@@ -8,8 +8,13 @@ import StatsBox from "../components/StatsBox.jsx";
 import Choices from "../components/Choices.jsx";
 
 import { initialStats, initialGameState } from "../data/demoStory.js";
-import { stories } from "../data/stories.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { getPlayableStoryById } from "../services/storyLibraryService.js";
+
+import {
+  unlockChapter,
+  getStoryChapterProgress,
+} from "../services/chapterProgressService.js";
 
 import {
   saveProgress,
@@ -23,13 +28,12 @@ import {
   applyGameStateChanges,
 } from "../utils/gameRules.js";
 
-import {
-  unlockChapter,
-  getStoryChapterProgress,
-} from "../services/chapterProgressService.js";
-
 function getChapterNumberFromScene(story, sceneKey, scene) {
   if (!story || !sceneKey) return 1;
+
+  if (scene?.chapterNumber) {
+    return scene.chapterNumber;
+  }
 
   const chapterFromList = story.chapters?.find(
     (chapter) => chapter.startScene === sceneKey
@@ -56,9 +60,9 @@ function Game() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
 
-  const story = stories.find((item) => item.id === storyId);
   const requestedScene = searchParams.get("scene");
 
+  const [story, setStory] = useState(null);
   const [currentSceneKey, setCurrentSceneKey] = useState("");
   const [stats, setStats] = useState(initialStats);
   const [gameState, setGameState] = useState(initialGameState);
@@ -66,23 +70,68 @@ function Game() {
 
   const [allowedChapter, setAllowedChapter] = useState(1);
   const [checkingChapterAccess, setCheckingChapterAccess] = useState(true);
+  const [loadingGame, setLoadingGame] = useState(true);
 
-  function getInitialScene() {
-    if (story?.scenes?.[requestedScene]) {
+  function getInitialScene(loadedStory) {
+    if (loadedStory?.scenes?.[requestedScene]) {
       return requestedScene;
     }
 
-    return story?.startScene || "";
+    return loadedStory?.startScene || "";
   }
 
   useEffect(() => {
-    if (!story) return;
+    async function prepareGame() {
+      if (!user?.id || !storyId) {
+        setLoadingGame(false);
+        return;
+      }
 
-    setCurrentSceneKey(getInitialScene());
-    setStats(initialStats);
-    setGameState(initialGameState);
-    setStatusText("");
-  }, [storyId, requestedScene]);
+      try {
+        setLoadingGame(true);
+
+        const loadedStory = await getPlayableStoryById(storyId);
+
+        if (!loadedStory || loadedStory.status !== "available") {
+          setStory(null);
+          return;
+        }
+
+        setStory(loadedStory);
+
+        const saved = await loadProgress({
+          userId: user.id,
+          storyId: loadedStory.id,
+        });
+
+        const initialScene = getInitialScene(loadedStory);
+
+        setCurrentSceneKey(initialScene);
+
+        if (saved) {
+          setStats(saved.stats || initialStats);
+
+          setGameState({
+            inventory: saved.inventory || [],
+            clues: saved.clues || [],
+            flags: saved.flags || {},
+          });
+        } else {
+          setStats(initialStats);
+          setGameState(initialGameState);
+        }
+
+        setStatusText("");
+      } catch (error) {
+        console.error("Error preparando partida:", error.message);
+        setStory(null);
+      } finally {
+        setLoadingGame(false);
+      }
+    }
+
+    prepareGame();
+  }, [storyId, requestedScene, user?.id]);
 
   useEffect(() => {
     async function checkChapterAccess() {
@@ -111,20 +160,20 @@ function Game() {
     checkChapterAccess();
   }, [user?.id, story?.id]);
 
-  if (!story || story.status !== "available") {
-    return <Navigate to="/historias" replace />;
-  }
-
-  if (checkingChapterAccess) {
+  if (loadingGame || checkingChapterAccess) {
     return (
       <main className="auth-page">
         <section className="auth-card">
           <span className="home-kicker">Verificando acceso</span>
           <h1>Cargando...</h1>
-          <p>Estamos revisando los capítulos desbloqueados.</p>
+          <p>Estamos revisando tu progreso y capítulos desbloqueados.</p>
         </section>
       </main>
     );
+  }
+
+  if (!story || story.status !== "available") {
+    return <Navigate to="/historias" replace />;
   }
 
   const requestedSceneData = requestedScene
@@ -158,68 +207,100 @@ function Game() {
     );
   }
 
-  async function unlockSceneChapter(nextSceneKey) {
-    const nextScene = story.scenes[nextSceneKey];
+  async function autoSaveGame(nextSceneKey, nextStats, nextGameState) {
+    await saveProgress({
+      userId: user.id,
+      storyId: story.id,
+      currentSceneKey: nextSceneKey,
+      stats: nextStats,
+      inventory: nextGameState.inventory,
+      clues: nextGameState.clues,
+      flags: nextGameState.flags,
+    });
+  }
 
-    const nextChapterNumber = getChapterNumberFromScene(
-      story,
-      nextSceneKey,
-      nextScene
-    );
+  async function unlockOnlyNextChapter(currentChapter, nextChapter) {
+    if (nextChapter !== currentChapter + 1) {
+      return;
+    }
 
     try {
-      await unlockChapter({
+      const progress = await unlockChapter({
         userId: user.id,
         storyId: story.id,
-        chapterNumber: nextChapterNumber,
+        chapterNumber: nextChapter,
       });
 
-      setAllowedChapter((current) => Math.max(current, nextChapterNumber));
+      setAllowedChapter(progress?.highest_chapter_unlocked || nextChapter);
     } catch (error) {
       console.error("Error desbloqueando capítulo:", error.message);
     }
   }
 
   async function handleChoice(choice) {
-    const updatedStats = applyChoiceEffects(stats, choice.effect || {});
-    const updatedGameState = applyGameStateChanges(gameState, choice);
+    const nextScene = story.scenes[choice.next];
 
-    setStats(updatedStats);
-    setGameState(updatedGameState);
-    setStatusText("");
-
-    if (updatedStats.vida <= 0 && story.scenes.finalSinVida) {
-      setCurrentSceneKey("finalSinVida");
-
-      await unlockSceneChapter("finalSinVida");
-
-      try {
-        await saveUnlockedEnding({
-          userId: user.id,
-          storyId: story.id,
-          endingKey: "finalSinVida",
-          endingName: story.scenes.finalSinVida.ending,
-        });
-      } catch (error) {
-        console.error("Error guardando final:", error.message);
-      }
-
+    if (!nextScene) {
+      setStatusText("La siguiente escena no existe.");
       return;
     }
 
-    setCurrentSceneKey(choice.next);
+    const currentChapter = getChapterNumberFromScene(
+      story,
+      currentSceneKey,
+      scene
+    );
 
-    await unlockSceneChapter(choice.next);
+    const nextChapter = getChapterNumberFromScene(
+      story,
+      choice.next,
+      nextScene
+    );
 
-    const nextScene = story.scenes[choice.next];
+    if (nextChapter > currentChapter + 1) {
+      setStatusText(
+        `Esta decisión pertenece a un capítulo avanzado. Primero debes completar el Capítulo ${currentChapter}.`
+      );
+      return;
+    }
 
-    if (nextScene?.ending) {
+    const updatedStats = applyChoiceEffects(stats, choice.effect || {});
+    const updatedGameState = applyGameStateChanges(gameState, choice);
+
+    let finalSceneKey = choice.next;
+    let finalScene = nextScene;
+
+    if (updatedStats.vida <= 0 && story.scenes.finalSinVida) {
+      finalSceneKey = "finalSinVida";
+      finalScene = story.scenes.finalSinVida;
+    }
+
+    setStats(updatedStats);
+    setGameState(updatedGameState);
+    setCurrentSceneKey(finalSceneKey);
+    setStatusText("");
+
+    try {
+      await autoSaveGame(finalSceneKey, updatedStats, updatedGameState);
+    } catch (error) {
+      console.error("Error guardando automáticamente:", error.message);
+    }
+
+    const finalChapter = getChapterNumberFromScene(
+      story,
+      finalSceneKey,
+      finalScene
+    );
+
+    await unlockOnlyNextChapter(currentChapter, finalChapter);
+
+    if (finalScene?.ending) {
       try {
         await saveUnlockedEnding({
           userId: user.id,
           storyId: story.id,
-          endingKey: choice.next,
-          endingName: nextScene.ending,
+          endingKey: finalSceneKey,
+          endingName: finalScene.ending,
         });
       } catch (error) {
         console.error("Error guardando final:", error.message);
@@ -265,8 +346,6 @@ function Game() {
         clues: saved.clues || [],
         flags: saved.flags || {},
       });
-
-      await unlockSceneChapter(saved.current_scene_key);
 
       setStatusText("Partida cargada correctamente desde la base de datos.");
     } catch (error) {

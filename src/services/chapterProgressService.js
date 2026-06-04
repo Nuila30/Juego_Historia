@@ -30,9 +30,18 @@ export async function getStoryChapterProgress({ userId, storyId }) {
 
 export async function unlockChapter({ userId, storyId, chapterNumber }) {
   const currentProgress = await getStoryChapterProgress({ userId, storyId });
+
   const currentHighest = currentProgress?.highest_chapter_unlocked || 1;
 
-  if (chapterNumber <= currentHighest) {
+  /*
+    Seguridad:
+    Aunque el juego intente mandar capítulo 4,
+    solo permitirá desbloquear el siguiente capítulo inmediato.
+  */
+  const nextAllowedChapter = currentHighest + 1;
+  const chapterToUnlock = Math.min(chapterNumber, nextAllowedChapter);
+
+  if (chapterToUnlock <= currentHighest) {
     return currentProgress;
   }
 
@@ -42,7 +51,7 @@ export async function unlockChapter({ userId, storyId, chapterNumber }) {
       {
         user_id: userId,
         story_id: storyId,
-        highest_chapter_unlocked: chapterNumber,
+        highest_chapter_unlocked: chapterToUnlock,
         updated_at: new Date().toISOString(),
       },
       {

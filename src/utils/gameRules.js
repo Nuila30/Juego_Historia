@@ -17,7 +17,13 @@ export function applyChoiceEffects(currentStats, effect = {}) {
 }
 
 export function addUniqueItems(currentItems = [], newItems = []) {
-  return [...new Set([...currentItems, ...newItems])];
+  return [...new Set([...(currentItems || []), ...(newItems || [])])];
+}
+
+export function removeItems(currentItems = [], itemsToRemove = []) {
+  return (currentItems || []).filter(
+    (item) => !itemsToRemove.includes(item)
+  );
 }
 
 export function checkRequirements(choice, gameState, stats) {
@@ -45,7 +51,7 @@ export function checkRequirements(choice, gameState, stats) {
 
   if (requirements.items) {
     const hasItems = requirements.items.every((item) =>
-      gameState.inventory.includes(item)
+      (gameState.inventory || []).includes(item)
     );
 
     if (!hasItems) {
@@ -58,7 +64,7 @@ export function checkRequirements(choice, gameState, stats) {
 
   if (requirements.clues) {
     const hasClues = requirements.clues.every((clue) =>
-      gameState.clues.includes(clue)
+      (gameState.clues || []).includes(clue)
     );
 
     if (!hasClues) {
@@ -71,7 +77,7 @@ export function checkRequirements(choice, gameState, stats) {
 
   if (requirements.flags) {
     for (const [flagName, flagValue] of Object.entries(requirements.flags)) {
-      if (gameState.flags[flagName] !== flagValue) {
+      if ((gameState.flags || {})[flagName] !== flagValue) {
         return {
           allowed: false,
           reason: "Esta opción depende de una decisión anterior.",
@@ -87,11 +93,33 @@ export function checkRequirements(choice, gameState, stats) {
 }
 
 export function applyGameStateChanges(currentGameState, choice) {
+  const currentInventory = currentGameState.inventory || [];
+  const currentClues = currentGameState.clues || [];
+  const currentFlags = currentGameState.flags || {};
+
+  let updatedInventory = addUniqueItems(
+    currentInventory,
+    choice.addItems || []
+  );
+
+  if (choice.removeItems) {
+    updatedInventory = removeItems(updatedInventory, choice.removeItems);
+  }
+
+  let updatedClues = addUniqueItems(
+    currentClues,
+    choice.addClues || []
+  );
+
+  if (choice.removeClues) {
+    updatedClues = removeItems(updatedClues, choice.removeClues);
+  }
+
   return {
-    inventory: addUniqueItems(currentGameState.inventory, choice.addItems || []),
-    clues: addUniqueItems(currentGameState.clues, choice.addClues || []),
+    inventory: updatedInventory,
+    clues: updatedClues,
     flags: {
-      ...currentGameState.flags,
+      ...currentFlags,
       ...(choice.setFlags || {}),
     },
   };
